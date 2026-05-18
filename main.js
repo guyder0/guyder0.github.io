@@ -777,7 +777,27 @@ async function main() {
 
     const rowLength = 3 * 4 + 3 * 4 + 4 + 4 + 4;
     const reader = req.body.getReader();
-    let splatData = new Uint8Array(req.headers.get("content-length"));
+
+    let chunks = [];
+    let totalLength = 0;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        totalLength += value.length;
+    }
+
+    let splatData = new Uint8Array(totalLength);
+    
+    let offset = 0;
+    for (let chunk of chunks) {
+        splatData.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    console.log("Файл полностью загружен и распакован. Размер:", totalLength);
 
     const downsample =
         splatData.length / rowLength > 500000 ? 1 : 1 / devicePixelRatio;
@@ -1500,38 +1520,10 @@ async function main() {
 
     // Логика выбора определенного сегмента завершена
 
-    let bytesRead = 0;
-    let lastVertexCount = -1;
-    let stopLoading = false;
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done || stopLoading) break;
-
-        splatData.set(value, bytesRead);
-        bytesRead += value.length;
-
-        if (vertexCount > lastVertexCount) {
-            if (!isPly(splatData)) {
-                worker.postMessage({
-                    buffer: splatData.buffer,
-                    vertexCount: Math.floor(bytesRead / rowLength),
-                });
-            }
-            lastVertexCount = vertexCount;
-        }
-    }
-    if (!stopLoading) {
-        if (isPly(splatData)) {
-            // ply file magic header means it should be handled differently
-            worker.postMessage({ ply: splatData.buffer, save: false });
-        } else {
-            worker.postMessage({
-                buffer: splatData.buffer,
-                vertexCount: Math.floor(bytesRead / rowLength),
-            });
-        }
-    }
+    worker.postMessage({
+        buffer: splatData.buffer,
+        vertexCount: Math.floor(totalLength / rowLength),
+    });
 }
 
 main().catch((err) => {
